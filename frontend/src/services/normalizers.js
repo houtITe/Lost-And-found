@@ -52,5 +52,10 @@ export function normalizeItem(item, index = 0) {
     })),
     contact: item.contact || "",
     reporterName: item.reporter_name || item.reporterName || "RUPP community member",
+    status: item.status || "open",
+    resolvedAt: item.resolved_at || item.resolvedAt || null,
+    resolvedByName: item.resolved_by_name || item.resolvedByName || "",
+    resolutionNote: item.resolution_note || item.resolutionNote || "",
+    isResolved: Boolean(item.resolved_at || item.resolvedAt),
   };
 }

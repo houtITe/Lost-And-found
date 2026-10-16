@@ -10,6 +10,7 @@ RUPP Lost & Found គឺជា platform សម្រាប់សិស្ស ន
 - Contact phone/Telegram នៅលើ report
 - Comments សម្រាប់ជូនដំណឹងអ្នកដែលបាត់
 - Private ownership claim ដែលមាន proof និង claim token
+- Resolve និង Recycle Bin ដើម្បីបិទ post ដោយ soft archive និងស្តារវិញដោយ reporter recovery token
 - Anonymous reporter token សម្រាប់ការគ្រប់គ្រង report នៅ backend
 - Laravel database persistence ដូច្នេះ post មិនបាត់ពេល refresh
 - Browser fallback នៅពេល backend មិនទាន់ដំណើរការ

@@ -12,8 +12,11 @@ Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10
 
 Route::get('/categories', [CategoryController::class, 'index'])->middleware('throttle:60,1');
 Route::get('/items', [ItemController::class, 'index'])->middleware('throttle:60,1');
+Route::get('/items/recycle-bin', [ItemController::class, 'recycleBin'])->middleware('throttle:30,1');
 Route::get('/items/{item}', [ItemController::class, 'show'])->middleware('throttle:60,1');
 Route::post('/items', [ItemController::class, 'store'])->middleware('throttle:10,1');
+Route::post('/items/{item}/resolve', [ItemController::class, 'resolve'])->middleware('throttle:10,1');
+Route::post('/items/{item}/restore', [ItemController::class, 'restore'])->middleware('throttle:10,1');
 Route::post('/items/{item}/comments', [CommentController::class, 'store'])->middleware('throttle:20,1');
 Route::post('/items/{item}/claims', [ClaimController::class, 'store'])->middleware('throttle:10,1');
 Route::get('/items/{item}/claims', [ClaimController::class, 'index'])->middleware('throttle:30,1');

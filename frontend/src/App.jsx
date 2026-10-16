@@ -8,6 +8,9 @@ import {
   fetchCategories,
   fetchItem,
   fetchItems,
+  fetchRecycleBin,
+  resolveItem,
+  restoreItem,
 } from "./services/api";
 import { getApiCategoryName, normalizeItem } from "./services/normalizers";
 
@@ -100,6 +103,7 @@ const developerInfo = {
 };
 const RUPP_LOGO_URL = "https://portal.verify.rupp.edu.kh/images/outside_logo.png";
 const REPORTED_ITEMS_STORAGE_KEY = "rupp-lost-and-found-reported-items";
+const RECYCLE_BIN_STORAGE_KEY = "rupp-lost-and-found-recycle-bin";
 
 const readFilesAsDataUrls = (fileList) =>
   Promise.all(
@@ -262,6 +266,8 @@ function App() {
   const [reportOpen, setReportOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [details, setDetails] = useState(null);
+  const [recycleOpen, setRecycleOpen] = useState(false);
+  const [recycleLoading, setRecycleLoading] = useState(false);
   const [claimOpen, setClaimOpen] = useState(false);
   const [reportType, setReportType] = useState("found");
   const [apiState, setApiState] = useState("loading");
@@ -275,6 +281,16 @@ function App() {
       return Array.isArray(parsedItems) ? parsedItems : items;
     } catch {
       return items;
+    }
+  });
+  const [recycleItems, setRecycleItems] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const storedItems = window.localStorage.getItem(RECYCLE_BIN_STORAGE_KEY);
+      const parsedItems = storedItems ? JSON.parse(storedItems) : null;
+      return Array.isArray(parsedItems) ? parsedItems : [];
+    } catch {
+      return [];
     }
   });
   const [reportForm, setReportForm] = useState({
@@ -306,6 +322,14 @@ function App() {
       // Storage can be unavailable or full; the current session still remains usable.
     }
   }, [reportedItems]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RECYCLE_BIN_STORAGE_KEY, JSON.stringify(recycleItems));
+    } catch {
+      // Storage can be unavailable or full; the current session still remains usable.
+    }
+  }, [recycleItems]);
 
   useEffect(() => {
     let mounted = true;
@@ -577,6 +601,92 @@ function App() {
     }
   };
 
+  const openRecycleBin = async () => {
+    setRecycleOpen(true);
+    setRecycleLoading(true);
+
+    try {
+      const response = await fetchRecycleBin();
+      setRecycleItems((response.data || []).map(normalizeItem));
+      setApiState("online");
+    } catch {
+      if (apiState !== "offline") setApiState("offline");
+    } finally {
+      setRecycleLoading(false);
+    }
+  };
+
+  const resolveCurrentItem = async () => {
+    if (!details || details.isResolved) return;
+    if (!window.confirm("តើអ្នកប្រាកដថារបស់នេះបានរកឃើញហើយ និងចង់បិទប្រកាសមែនទេ?")) return;
+
+    setIsSubmitting(true);
+    try {
+      let archivedItem;
+      if (apiState === "online") {
+        const response = await resolveItem(details.id, {
+          resolvedByName: "RUPP community member",
+        });
+        archivedItem = normalizeItem(response.item);
+      } else {
+        archivedItem = normalizeItem({
+          ...details,
+          resolved_at: new Date().toISOString(),
+          resolved_by_name: "RUPP community member",
+        });
+      }
+
+      setReportedItems((current) => current.filter((item) => item.id !== details.id));
+      setRecycleItems((current) => [
+        archivedItem,
+        ...current.filter((item) => item.id !== details.id),
+      ]);
+      setDetails(null);
+      setClaimOpen(false);
+      showToast("ប្រកាសត្រូវបានបិទ និងផ្លាស់ទៅក្នុង Recycle Bin");
+    } catch (error) {
+      showToast(error.message || "មិនអាចបិទប្រកាសបានទេ");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const restoreArchivedItem = async (item) => {
+    if (!window.confirm("តើអ្នកចង់ស្តារប្រកាសនេះត្រឡប់ទៅបញ្ជីវិញមែនទេ?")) return;
+
+    setIsSubmitting(true);
+    try {
+      let restoredItem;
+      const tokenKey = `rupp-reporter-token-${item.id}`;
+      let reporterToken = window.localStorage.getItem(tokenKey) || "";
+
+      if (apiState === "online" && item.public_id) {
+        if (!reporterToken) {
+          reporterToken = window.prompt("បញ្ចូល recovery code របស់ប្រកាសនេះ:")?.trim() || "";
+        }
+        if (!reporterToken) return;
+
+        const response = await restoreItem(item.id, reporterToken);
+        restoredItem = normalizeItem(response.item);
+      } else {
+        restoredItem = normalizeItem({
+          ...item,
+          resolved_at: null,
+          resolved_by_name: null,
+          resolution_note: null,
+        });
+      }
+
+      setRecycleItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
+      setReportedItems((current) => [restoredItem, ...current]);
+      showToast("ប្រកាសត្រូវបានស្តារត្រឡប់វិញ");
+    } catch (error) {
+      showToast(error.message || "Recovery code មិនត្រឹមត្រូវ ឬមិនអាចស្តារបានទេ");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -600,8 +710,18 @@ function App() {
           </a>
           <a href="#items">ស្វែងរករបស់</a>
           <a href="#contact">ទាក់ទង</a>
+          <button className="nav-link-button" onClick={openRecycleBin}>
+            ធុងសំរាម
+          </button>
         </nav>
         <div className="top-actions">
+          <button
+            className="recycle-mobile-button"
+            onClick={openRecycleBin}
+            aria-label="បើក Recycle Bin"
+          >
+            ↺
+          </button>
           <button className="report-small" onClick={() => openReport("found")}>
             <Icon name="plus" /> រាយការណ៍
           </button>
@@ -1105,6 +1225,59 @@ function App() {
           </div>
         </div>
       )}
+      {recycleOpen && (
+        <div className="modal" onClick={() => setRecycleOpen(false)}>
+          <div className="dialog recycle-dialog" onClick={(event) => event.stopPropagation()}>
+            <button className="close" onClick={() => setRecycleOpen(false)}>
+              ×
+            </button>
+            <span className="item-category">RECYCLE BIN</span>
+            <h2>ធុងសំរាមប្រកាស</h2>
+            <p>
+              នៅទីនេះជាប្រកាសដែលសហគមន៍បានបញ្ជាក់ថារកឃើញហើយ។ បើចុចខុស reporter អាចស្តារវិញ
+              ដោយ recovery code។
+            </p>
+            {recycleLoading ? (
+              <div className="recycle-empty">កំពុងផ្ទុកប្រកាសដែលបានបិទ...</div>
+            ) : recycleItems.length ? (
+              <div className="recycle-list">
+                {recycleItems.map((item) => (
+                  <article className="recycle-card" key={item.id}>
+                    <div className={`recycle-thumb ${item.color}`}>
+                      {item.image ? (
+                        <img src={item.image} alt="" />
+                      ) : (
+                        <span>{item.code}</span>
+                      )}
+                    </div>
+                    <div className="recycle-card-content">
+                      <strong>{item.title}</strong>
+                      <span>
+                        {item.type === "found" ? "រកឃើញ" : "បាត់"} · {item.place}
+                      </span>
+                      <small>
+                        បានបិទនៅ{" "}
+                        {item.resolvedAt
+                          ? new Date(item.resolvedAt).toLocaleDateString("km-KH")
+                          : "មិនទាន់បញ្ជាក់"}
+                      </small>
+                    </div>
+                    <button
+                      className="restore-button"
+                      onClick={() => restoreArchivedItem(item)}
+                      disabled={isSubmitting}
+                    >
+                      ស្តារវិញ
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="recycle-empty">មិនទាន់មានប្រកាសនៅក្នុង Recycle Bin ទេ</div>
+            )}
+          </div>
+        </div>
+      )}
       {details && (
         <div
           className="modal"
@@ -1163,6 +1336,20 @@ function App() {
                   {details.contact}
                 </a>
               </p>
+            )}
+            {!details.isResolved && (
+              <div className="resolution-action">
+                <button
+                  className="resolve-post-button"
+                  onClick={resolveCurrentItem}
+                  disabled={isSubmitting}
+                >
+                  ✓ រកឃើញហើយ — បិទប្រកាស
+                </button>
+                <small>
+                  ប្រកាសនឹងចូល Recycle Bin ហើយ reporter អាចស្តារវិញដោយ recovery code។
+                </small>
+              </div>
             )}
             {details.type === "lost" ? (
               <section className="comment-section">

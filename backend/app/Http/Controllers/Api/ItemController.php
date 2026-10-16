@@ -23,6 +23,7 @@ class ItemController extends Controller
         $items = Item::query()
             ->with('category:id,name')
             ->withCount(['comments', 'claims'])
+            ->whereNull('resolved_at')
             ->when($filters['type'] ?? null, fn ($query, $value) => $query->where('type', $value))
             ->when($filters['status'] ?? null, fn ($query, $value) => $query->where('status', $value))
             ->when(
@@ -52,7 +53,95 @@ class ItemController extends Controller
             'comments:id,item_id,name,message,image_paths,created_at',
         ]);
 
+        if ($item->resolved_at) {
+            $item->makeHidden('contact');
+        }
+
         return response()->json($item);
+    }
+
+    public function recycleBin(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'type' => ['nullable', 'in:lost,found'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $items = Item::query()
+            ->with('category:id,name')
+            ->withCount(['comments', 'claims'])
+            ->whereNotNull('resolved_at')
+            ->when($filters['type'] ?? null, fn ($query, $value) => $query->where('type', $value))
+            ->when($filters['search'] ?? null, function ($query, $term) {
+                $query->where(function ($query) use ($term) {
+                    $query
+                        ->where('title', 'like', "%{$term}%")
+                        ->orWhere('keywords', 'like', "%{$term}%")
+                        ->orWhere('description', 'like', "%{$term}%")
+                        ->orWhere('location', 'like', "%{$term}%");
+                });
+            })
+            ->latest('resolved_at')
+            ->paginate($filters['per_page'] ?? 24)
+            ->withQueryString();
+
+        $items->getCollection()->each(fn (Item $item) => $item->makeHidden('contact'));
+
+        return response()->json($items);
+    }
+
+    public function resolve(Request $request, Item $item): JsonResponse
+    {
+        $data = $request->validate([
+            'confirmation' => ['required', 'accepted'],
+            'resolved_by_name' => ['nullable', 'string', 'max:100'],
+            'resolution_note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        if ($item->resolved_at) {
+            return response()->json([
+                'message' => 'This report is already in the recycle bin.',
+                'item' => $item,
+            ], 409);
+        }
+
+        $item->update([
+            'status_before_resolution' => $item->status,
+            'resolved_at' => now(),
+            'resolved_by_name' => $data['resolved_by_name'] ?? 'RUPP community member',
+            'resolution_note' => $data['resolution_note'] ?? null,
+        ]);
+
+        return response()->json([
+            'message' => 'The report was moved to the recycle bin.',
+            'item' => $item->fresh()->load('category:id,name'),
+        ]);
+    }
+
+    public function restore(Request $request, Item $item): JsonResponse
+    {
+        $this->authorizeReporter($request, $item);
+
+        if (!$item->resolved_at) {
+            return response()->json([
+                'message' => 'This report is already active.',
+                'item' => $item,
+            ], 409);
+        }
+
+        $item->update([
+            'status' => $item->status_before_resolution ?: 'open',
+            'status_before_resolution' => null,
+            'resolved_at' => null,
+            'resolved_by_name' => null,
+            'resolution_note' => null,
+        ]);
+
+        return response()->json([
+            'message' => 'The report was restored.',
+            'item' => $item->fresh()->load('category:id,name'),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -102,5 +191,18 @@ class ItemController extends Controller
             'item' => $item,
             'manage_token' => $manageToken,
         ], 201);
+    }
+
+    private function authorizeReporter(Request $request, Item $item): void
+    {
+        $token = $request->header('X-Reporter-Token');
+        abort_unless(
+            $token && $item->reporter_token_hash && hash_equals(
+                $item->reporter_token_hash,
+                hash('sha256', $token)
+            ),
+            403,
+            'A valid reporter token is required to restore this report.'
+        );
     }
 }

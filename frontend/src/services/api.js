@@ -27,6 +27,32 @@ export async function fetchItem(itemId) {
   return request(`/items/${itemId}`);
 }
 
+export async function fetchRecycleBin() {
+  return request("/items/recycle-bin?per_page=100");
+}
+
+export async function resolveItem(itemId, { resolvedByName, resolutionNote } = {}) {
+  return request(`/items/${itemId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      confirmation: true,
+      resolved_by_name: resolvedByName,
+      resolution_note: resolutionNote,
+    }),
+  });
+}
+
+export async function restoreItem(itemId, reporterToken) {
+  return request(`/items/${itemId}/restore`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "X-Reporter-Token": reporterToken,
+    },
+  });
+}
+
 export async function createItem({ fields, files = [] }) {
   const formData = new FormData();
   Object.entries(fields).forEach(([key, value]) => {

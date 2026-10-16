@@ -26,6 +26,10 @@ class Item extends Model
         'image_paths',
         'verification_question',
         'status',
+        'status_before_resolution',
+        'resolved_at',
+        'resolved_by_name',
+        'resolution_note',
     ];
 
     protected $hidden = ['reporter_token_hash'];
@@ -37,6 +41,7 @@ class Item extends Model
         return [
             'event_date' => 'date',
             'image_paths' => 'array',
+            'resolved_at' => 'datetime',
         ];
     }
 

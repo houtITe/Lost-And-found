@@ -77,4 +77,47 @@ class GuestItemsApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('status', 'accepted');
     }
+
+    public function test_anyone_can_archive_a_report_and_only_the_reporter_can_restore_it(): void
+    {
+        $category = Category::create(['name' => 'Keys']);
+        $create = $this->postJson('/api/items', [
+            'reporter_name' => 'Sophea',
+            'contact' => '012111222',
+            'category_id' => $category->id,
+            'type' => 'lost',
+            'title' => 'Motorbike key',
+            'description' => 'Lost near the north parking area.',
+            'location' => 'North parking area',
+            'event_date' => now()->toDateString(),
+        ])->assertCreated();
+
+        $itemId = $create->json('item.id');
+        $reporterToken = $create->json('manage_token');
+
+        $this->postJson("/api/items/{$itemId}/resolve", [
+            'confirmation' => true,
+            'resolved_by_name' => 'RUPP community member',
+        ])
+            ->assertOk()
+            ->assertJsonPath('item.title', 'Motorbike key')
+            ->assertJsonPath('item.resolved_by_name', 'RUPP community member');
+
+        $this->getJson('/api/items')->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson('/api/items/recycle-bin')
+            ->assertOk()
+            ->assertJsonPath('data.0.title', 'Motorbike key')
+            ->assertJsonMissingPath('data.0.contact');
+
+        $this->postJson("/api/items/{$itemId}/restore")
+            ->assertForbidden();
+
+        $this->withHeader('X-Reporter-Token', $reporterToken)
+            ->postJson("/api/items/{$itemId}/restore")
+            ->assertOk()
+            ->assertJsonPath('item.resolved_at', null)
+            ->assertJsonPath('item.status', 'open');
+
+        $this->getJson('/api/items')->assertOk()->assertJsonPath('data.0.title', 'Motorbike key');
+    }
 }
