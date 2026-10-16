@@ -98,7 +98,7 @@ const developerInfo = {
   telegramUrl: "https://t.me/MhoutA1",
   donationQrImage: "/aba-qr.png",
 };
-const BRAND_ICON_URL = "/favicon.svg";
+const RUPP_LOGO_URL = "https://portal.verify.rupp.edu.kh/images/outside_logo.png";
 const REPORTED_ITEMS_STORAGE_KEY = "rupp-lost-and-found-reported-items";
 
 const readFilesAsDataUrls = (fileList) =>
@@ -583,8 +583,8 @@ function App() {
         <a className="brand" href="#home">
           <span className="logo-box">
             <OptionalImage
-              src={BRAND_ICON_URL}
-              alt="RUPP Lost and Found icon"
+              src={RUPP_LOGO_URL}
+              alt="RUPP official logo"
               className="logo-image"
               fallback={<span className="asset-fallback logo-fallback">RUPP</span>}
             />
@@ -884,8 +884,8 @@ function App() {
           <div className="footer-brand">
             <span className="logo-box">
               <OptionalImage
-                src={BRAND_ICON_URL}
-                alt="RUPP Lost and Found icon"
+                src={RUPP_LOGO_URL}
+                alt="RUPP official logo"
                 className="logo-image"
                 fallback={<span className="asset-fallback logo-fallback">RUPP</span>}
               />
