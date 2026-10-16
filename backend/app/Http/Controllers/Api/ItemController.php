@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Item;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class ItemController extends Controller
 {
@@ -16,22 +17,29 @@ class ItemController extends Controller
             'status' => ['nullable', 'in:open,claimed,returned'],
             'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'search' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $items = Item::query()
-            ->with(['user:id,name,faculty', 'category:id,name'])
-            ->when($filters['type'] ?? null, fn ($q, $v) => $q->where('type', $v))
-            ->when($filters['status'] ?? null, fn ($q, $v) => $q->where('status', $v))
-            ->when($filters['category_id'] ?? null, fn ($q, $v) => $q->where('category_id', $v))
-            ->when($filters['search'] ?? null, function ($q, $term) {
-                $q->where(function ($q) use ($term) {
-                    $q->where('title', 'like', "%{$term}%")
+            ->with('category:id,name')
+            ->withCount(['comments', 'claims'])
+            ->when($filters['type'] ?? null, fn ($query, $value) => $query->where('type', $value))
+            ->when($filters['status'] ?? null, fn ($query, $value) => $query->where('status', $value))
+            ->when(
+                $filters['category_id'] ?? null,
+                fn ($query, $value) => $query->where('category_id', $value)
+            )
+            ->when($filters['search'] ?? null, function ($query, $term) {
+                $query->where(function ($query) use ($term) {
+                    $query
+                        ->where('title', 'like', "%{$term}%")
+                        ->orWhere('keywords', 'like', "%{$term}%")
                         ->orWhere('description', 'like', "%{$term}%")
                         ->orWhere('location', 'like', "%{$term}%");
                 });
             })
             ->latest()
-            ->paginate(12)
+            ->paginate($filters['per_page'] ?? 24)
             ->withQueryString();
 
         return response()->json($items);
@@ -39,7 +47,10 @@ class ItemController extends Controller
 
     public function show(Item $item): JsonResponse
     {
-        $item->load(['user:id,name,faculty', 'category:id,name']);
+        $item->load([
+            'category:id,name',
+            'comments:id,item_id,name,message,image_paths,created_at',
+        ]);
 
         return response()->json($item);
     }
@@ -47,24 +58,49 @@ class ItemController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
+            'reporter_name' => ['required', 'string', 'max:100'],
+            'contact' => ['required', 'string', 'max:80'],
             'category_id' => ['required', 'integer', 'exists:categories,id'],
             'type' => ['required', 'in:lost,found'],
             'title' => ['required', 'string', 'max:255'],
+            'keywords' => ['nullable', 'string', 'max:500'],
             'description' => ['required', 'string', 'max:5000'],
             'location' => ['required', 'string', 'max:255'],
-            'event_date' => ['required', 'date', 'before_or_equal:today'],
-            'verification_question' => ['required_if:type,found', 'nullable', 'string', 'max:255'],
+            'event_date' => ['nullable', 'date', 'before_or_equal:today'],
+            'verification_question' => ['nullable', 'string', 'max:255'],
+            'images' => ['nullable', 'array', 'max:6'],
+            'images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ]);
 
+        $files = $request->file('images', []);
+        $files = is_array($files) ? $files : [$files];
         if ($request->hasFile('image')) {
-            $data['image_path'] = $request->file('image')->store('items', 'public');
+            $files[] = $request->file('image');
         }
-        unset($data['image']);
 
-        $item = $request->user()->items()->create($data);
-        $item->refresh()->load(['user:id,name,faculty', 'category:id,name']);
+        $paths = collect($files)
+            ->filter()
+            ->take(6)
+            ->map(fn ($file) => $file->store('items', 'public'))
+            ->values()
+            ->all();
 
-        return response()->json($item, 201);
+        $manageToken = Str::random(48);
+        $data['public_id'] = (string) Str::uuid();
+        $data['user_id'] = $request->user()?->id;
+        $data['reporter_token_hash'] = hash('sha256', $manageToken);
+        $data['event_date'] = $data['event_date'] ?? now()->toDateString();
+        $data['image_path'] = $paths[0] ?? null;
+        $data['image_paths'] = $paths;
+        unset($data['images'], $data['image']);
+
+        $item = Item::create($data);
+        $item->load('category:id,name');
+
+        return response()->json([
+            'item' => $item,
+            'manage_token' => $manageToken,
+        ], 201);
     }
 }

@@ -79,3 +79,21 @@
 .logo-fallback{width:100%;height:100%;border:0;background:transparent;color:#b58a2a;font:700 17px 'DM Sans';letter-spacing:1px}
 .qr-fallback{width:150px;height:150px;padding:12px}
 .map-fallback{width:100%;height:100%;min-height:260px;padding:20px}
+.board-status{display:flex;align-items:center;gap:10px}
+.api-status{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:999px;font-size:8px;font-weight:800;letter-spacing:.8px}
+.api-status::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.api-status.online{color:#287b62;background:#e8f7ef}
+.api-status.loading{color:#9b7840;background:#fff7e8}
+.api-status.offline{color:#a26050;background:#fff0eb}
+.item-contact{overflow-wrap:anywhere}
+@media(max-width:520px){.board-status{align-items:flex-end;flex-direction:column;gap:5px}.api-status{font-size:7px}}
+.claim-toggle{margin-top:9px;width:100%;background:#eef8f3;color:#287163;border:1px solid #b6d8ca}
+.claim-toggle:hover{background:#dff1e8}
+.claim-form{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:12px;border:1px solid #dcebe4;border-radius:10px;background:#f7fcf9}
+.claim-form strong{color:#315c51;font-size:11px}
+.claim-form input,.claim-form textarea{width:100%;border:1px solid #d9e8e1;border-radius:7px;padding:9px 10px;color:#55766c;font-size:10px;background:#fff;outline:0}
+.claim-form textarea{min-height:76px;resize:vertical}
+.claim-upload{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#78918a;font-size:9px}
+.claim-upload input{max-width:130px;padding:0;border:0}
+.claim-actions{display:flex;gap:8px;justify-content:flex-end}
+.claim-actions button{padding:9px 12px;font-size:10px}

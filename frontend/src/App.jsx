@@ -1,6 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import "./support.css";
+import {
+  createClaim,
+  createComment,
+  createItem,
+  fetchCategories,
+  fetchItem,
+  fetchItems,
+} from "./services/api";
+import { getApiCategoryName, normalizeItem } from "./services/normalizers";
 
 const categories = [
   "ទាំងអស់",
@@ -89,6 +98,36 @@ const developerInfo = {
   telegramUrl: "https://t.me/MhoutA1",
   donationQrImage: "/aba-qr.png",
 };
+const RUPP_LOGO_URL = "https://portal.verify.rupp.edu.kh/images/outside_logo.png";
+const REPORTED_ITEMS_STORAGE_KEY = "rupp-lost-and-found-reported-items";
+
+const readFilesAsDataUrls = (fileList) =>
+  Promise.all(
+    Array.from(fileList || []).map(
+      (file) =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        }),
+    ),
+  );
+
+const getContactHref = (contact) => {
+  const value = contact.trim();
+  if (!value) return "#";
+  if (value.startsWith("@")) return `https://t.me/${value.slice(1)}`;
+  if (/^(https?:\/\/)?t\.me\//i.test(value)) {
+    return value.startsWith("http") ? value : `https://${value}`;
+  }
+  if (/^https?:\/\//i.test(value)) return value;
+  return `tel:${value.replace(/[^\d+]/g, "")}`;
+};
+
+const isExternalContact = (contact) =>
+  /^@|^(https?:\/\/)?t\.me\//i.test(contact.trim()) || /^https?:\/\//i.test(contact.trim());
+
 function Icon({ name }) {
   const paths = {
     search: (
@@ -118,9 +157,6 @@ function Icon({ name }) {
       <>
         <path d="M12 5v14M5 12h14" />
       </>
-    ),
-    heart: (
-      <path d="M20.8 8.8c0 5.3-8.8 10.2-8.8 10.2S3.2 14.1 3.2 8.8a4.7 4.7 0 0 1 8.8-2.3 4.7 4.7 0 0 1 8.8 2.3Z" />
     ),
     mail: (
       <>
@@ -226,9 +262,23 @@ function App() {
   const [reportOpen, setReportOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [details, setDetails] = useState(null);
+  const [claimOpen, setClaimOpen] = useState(false);
   const [reportType, setReportType] = useState("found");
-  const [reportedItems, setReportedItems] = useState(items);
+  const [apiState, setApiState] = useState("loading");
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reportedItems, setReportedItems] = useState(() => {
+    if (typeof window === "undefined") return items;
+    try {
+      const storedItems = window.localStorage.getItem(REPORTED_ITEMS_STORAGE_KEY);
+      const parsedItems = storedItems ? JSON.parse(storedItems) : null;
+      return Array.isArray(parsedItems) ? parsedItems : items;
+    } catch {
+      return items;
+    }
+  });
   const [reportForm, setReportForm] = useState({
+    reporterName: "",
     title: "",
     keywords: "",
     category: "ផ្សេងៗ",
@@ -236,11 +286,45 @@ function App() {
     description: "",
     location: "",
   });
+  const [claimForm, setClaimForm] = useState({
+    name: "",
+    contact: "",
+    proof: "",
+  });
   const [imagePreviews, setImagePreviews] = useState([]);
+  const [imageFiles, setImageFiles] = useState([]);
   const [commentText, setCommentText] = useState("");
   const [commentImagePreviews, setCommentImagePreviews] = useState([]);
-  const [saved, setSaved] = useState([]);
+  const [commentFiles, setCommentFiles] = useState([]);
+  const [claimFiles, setClaimFiles] = useState([]);
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(REPORTED_ITEMS_STORAGE_KEY, JSON.stringify(reportedItems));
+    } catch {
+      // Storage can be unavailable or full; the current session still remains usable.
+    }
+  }, [reportedItems]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    Promise.all([fetchCategories(), fetchItems({ page: 1 })])
+      .then(([remoteCategories, remoteItems]) => {
+        if (!mounted) return;
+        setCategoryOptions(remoteCategories);
+        setReportedItems((remoteItems.data || []).map(normalizeItem));
+        setApiState("online");
+      })
+      .catch(() => {
+        if (mounted) setApiState("offline");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const filteredItems = useMemo(
     () =>
@@ -264,15 +348,10 @@ function App() {
     window.setTimeout(() => setToast(""), 2200);
   };
 
-  const toggleSaved = (id) => {
-    const isSaved = saved.includes(id);
-    setSaved((current) => (isSaved ? current.filter((itemId) => itemId !== id) : [...current, id]));
-    showToast(isSaved ? "បានដកចេញពីបញ្ជីរក្សាទុក" : "បានរក្សាទុករបស់នេះ");
-  };
-
   const openReport = (kind) => {
     setReportType(kind);
     setReportForm({
+      reporterName: "",
       title: "",
       keywords: "",
       category: "ផ្សេងៗ",
@@ -281,16 +360,27 @@ function App() {
       location: "",
     });
     setImagePreviews([]);
+    setImageFiles([]);
     setReportOpen(true);
   };
 
   const updateReportField = (field, value) =>
     setReportForm((current) => ({ ...current, [field]: value }));
 
-  const submitReport = () => {
+  const submitReport = async () => {
+    const reporterName = reportForm.reporterName.trim();
     const title = reportForm.title.trim();
+    const contact = reportForm.contact.trim();
+    if (!reporterName) {
+      showToast("Please enter your name so people know who posted this report");
+      return;
+    }
     if (!title) {
       showToast("សូមបញ្ចូលឈ្មោះរបស់ ដើម្បីឲ្យគេស្វែងរកបាន");
+      return;
+    }
+    if (!contact) {
+      showToast("Phone or Telegram is required for contact");
       return;
     }
     const code = title
@@ -301,6 +391,7 @@ function App() {
       .toUpperCase();
     const newItem = {
       id: Date.now(),
+      reporterName,
       title,
       category: reportForm.category,
       type: reportType,
@@ -310,13 +401,47 @@ function App() {
       code: code || "NEW",
       description: reportForm.description.trim() || "មិនទាន់មានការពិពណ៌នា",
       keywords: reportForm.keywords.trim(),
+      contact,
       image: imagePreviews[0] || "",
       images: imagePreviews,
       comments: [],
     };
-    setReportedItems((current) => [newItem, ...current]);
+    let itemToAdd = newItem;
+    let saveMessage;
+    setIsSubmitting(true);
+    try {
+      const categoryName = getApiCategoryName(reportForm.category);
+      const categoryId = categoryOptions.find((option) => option.name === categoryName)?.id;
+      const response = await createItem({
+        fields: {
+          reporter_name: reporterName,
+          contact,
+          category_id: categoryId,
+          type: reportType,
+          title,
+          keywords: reportForm.keywords.trim(),
+          description: reportForm.description.trim() || "No description provided",
+          location: reportForm.location.trim() || "RUPP campus",
+          event_date: new Date().toISOString().slice(0, 10),
+        },
+        files: imageFiles,
+      });
+      itemToAdd = normalizeItem(response.item);
+      setApiState("online");
+      if (response.manage_token) {
+        window.localStorage.setItem(`rupp-reporter-token-${itemToAdd.id}`, response.manage_token);
+      }
+      saveMessage = "Your report is now visible to the RUPP community.";
+    } catch {
+      setApiState("offline");
+      saveMessage = "Saved in this browser. Start the backend to share it with everyone.";
+    } finally {
+      setIsSubmitting(false);
+    }
+    setReportedItems((current) => [itemToAdd, ...current]);
     setReportOpen(false);
     setReportForm({
+      reporterName: "",
       title: "",
       keywords: "",
       category: "ផ្សេងៗ",
@@ -325,10 +450,11 @@ function App() {
       location: "",
     });
     setImagePreviews([]);
-    showToast("បានបង្ហោះព័ត៌មាន ហើយអាចស្វែងរកបាន");
+    setImageFiles([]);
+    showToast(saveMessage);
   };
 
-  const submitComment = () => {
+  const submitComment = async () => {
     const text = commentText.trim();
     if ((!text && !commentImagePreviews.length) || !details) return;
     const comment = {
@@ -338,17 +464,68 @@ function App() {
       images: commentImagePreviews,
       date: "ទើបតែ",
     };
+    let savedComment = comment;
+    try {
+      const response = await createComment(details.id, {
+        name: "RUPP user",
+        message: text,
+        files: commentFiles,
+      });
+      savedComment = {
+        ...response,
+        text: response.message,
+        images: response.image_urls || [],
+        date: response.created_at || comment.date,
+      };
+    } catch {
+      setApiState("offline");
+    }
     setReportedItems((current) =>
       current.map((item) =>
-        item.id === details.id ? { ...item, comments: [...(item.comments || []), comment] } : item,
+        item.id === details.id
+          ? { ...item, comments: [...(item.comments || []), savedComment] }
+          : item,
       ),
     );
     setDetails((current) =>
-      current ? { ...current, comments: [...(current.comments || []), comment] } : current,
+      current ? { ...current, comments: [...(current.comments || []), savedComment] } : current,
     );
     setCommentText("");
     setCommentImagePreviews([]);
+    setCommentFiles([]);
     showToast("បានបន្ថែម comment ទៅក្នុង post");
+  };
+
+  const updateClaimField = (field, value) =>
+    setClaimForm((current) => ({ ...current, [field]: value }));
+
+  const submitClaim = async () => {
+    if (!details) return;
+    const claimantName = claimForm.name.trim();
+    const contact = claimForm.contact.trim();
+    const proof = claimForm.proof.trim();
+    if (!claimantName || !contact || !proof) {
+      showToast("Please complete your name, contact and proof of ownership");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await createClaim(details.id, {
+        claimantName,
+        contact,
+        proof,
+        files: claimFiles,
+      });
+      setClaimOpen(false);
+      setClaimForm({ name: "", contact: "", proof: "" });
+      setClaimFiles([]);
+      showToast("Your claim was sent privately for review");
+    } catch {
+      showToast("Start the backend before sending a private claim");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleHeroPointerMove = (event) => {
@@ -387,13 +564,26 @@ function App() {
     event.currentTarget.style.setProperty("--spot-y", "50%");
   };
 
+  const openDetails = async (item) => {
+    setDetails(item);
+    setClaimOpen(false);
+    if (apiState !== "online" || !item.id) return;
+
+    try {
+      const remoteItem = await fetchItem(item.id);
+      setDetails(normalizeItem(remoteItem));
+    } catch {
+      // The card data is still useful when the detail request is unavailable.
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
         <a className="brand" href="#home">
           <span className="logo-box">
             <OptionalImage
-              src="/rupp-logo.png"
+              src={RUPP_LOGO_URL}
               alt="RUPP logo"
               className="logo-image"
               fallback={<span className="asset-fallback logo-fallback">RUPP</span>}
@@ -412,16 +602,6 @@ function App() {
           <a href="#contact">ទាក់ទង</a>
         </nav>
         <div className="top-actions">
-          <button
-            className="saved-link"
-            onClick={() => {
-              setType("all");
-              setSearch("");
-              showToast(`${saved.length} របស់បានរក្សាទុក`);
-            }}
-          >
-            <Icon name="heart" /> របស់ខ្ញុំ <span>{saved.length}</span>
-          </button>
           <button className="report-small" onClick={() => openReport("found")}>
             <Icon name="plus" /> រាយការណ៍
           </button>
@@ -529,7 +709,12 @@ function App() {
               <h2>របស់ដែលបានរាយការណ៍ថ្មីៗ</h2>
               <p>ស្វែងរកតាមឈ្មោះរបស់ ពាក្យជំនួស ទីតាំង ឬប្រភេទ។</p>
             </div>
-            <span className="result-count">{filteredItems.length} results</span>
+            <div className="board-status">
+              <span className="result-count">{filteredItems.length} results</span>
+              <span className={`api-status ${apiState}`}>
+                {apiState === "online" ? "LIVE" : apiState === "loading" ? "CONNECTING" : "OFFLINE"}
+              </span>
+            </div>
           </div>
           <div className="search-box">
             <Icon name="search" />
@@ -598,7 +783,7 @@ function App() {
                 របស់ដែលបាត់
               </button>
               <button className={type === "found" ? "active" : ""} onClick={() => setType("found")}>
-                របស់ដែលត្រូវបានគេរកឃើញ
+                របស់ដែលត្រូវបានគេរកឃើញឬរើសបាន
               </button>
             </div>
           </div>
@@ -607,7 +792,7 @@ function App() {
               <article
                 className="item-card"
                 key={item.id}
-                onClick={() => setDetails(item)}
+                onClick={() => openDetails(item)}
                 onPointerMove={handleCardPointerMove}
                 onPointerLeave={resetCardPointer}
               >
@@ -618,16 +803,6 @@ function App() {
                     <span>{item.code}</span>
                   )}
                   <b className={item.type}>{item.type === "found" ? "រកឃើញ" : "បាត់"}</b>
-                  <button
-                    className={saved.includes(item.id) ? "saved" : ""}
-                    aria-label="រក្សាទុក"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleSaved(item.id);
-                    }}
-                  >
-                    <Icon name="heart" />
-                  </button>
                 </div>
                 <div className="item-content">
                   <span className="item-category">{item.category}</span>
@@ -638,6 +813,20 @@ function App() {
                   <p>
                     <Icon name="clock" /> {item.date}
                   </p>
+                  {item.contact && (
+                    <p>
+                      <Icon name="phone" />
+                      <a
+                        className="item-contact"
+                        href={getContactHref(item.contact)}
+                        target={isExternalContact(item.contact) ? "_blank" : undefined}
+                        rel="noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {item.contact}
+                      </a>
+                    </p>
+                  )}
                   <button className="details-link">
                     មើលព័ត៌មានលម្អិត <Icon name="arrow" />
                   </button>
@@ -695,7 +884,7 @@ function App() {
           <div className="footer-brand">
             <span className="logo-box">
               <OptionalImage
-                src="/rupp-logo.png"
+                src={RUPP_LOGO_URL}
                 alt="RUPP logo"
                 className="logo-image"
                 fallback={<span className="asset-fallback logo-fallback">RUPP</span>}
@@ -740,15 +929,23 @@ function App() {
                 className={reportType === "found" ? "active" : ""}
                 onClick={() => setReportType("found")}
               >
-                របស់ដែលត្រូវបានគេរកឃើញ
+                POST របស់ដែលត្រូវបានគេរកឃើញឬរើសបាន
               </button>
               <button
                 className={reportType === "lost" ? "active lost" : ""}
                 onClick={() => setReportType("lost")}
               >
-                របស់ដែលបាត់
+                POST ដើម្បីស្វែងរករបស់ដែលបាត់
               </button>
             </div>
+            <label>
+              ឈ្មោះអ្នករាយការណ៍{" "}
+              <input
+                value={reportForm.reporterName}
+                onChange={(e) => updateReportField("reporterName", e.target.value)}
+                placeholder="ឧ. សុខា"
+              />
+            </label>
             <label>
               ឈ្មោះរបស់{" "}
               <input
@@ -784,6 +981,7 @@ function App() {
             <label>
               ទំនាក់ទំនង{" "}
               <input
+                type="tel"
                 value={reportForm.contact}
                 onChange={(e) => updateReportField("contact", e.target.value)}
                 placeholder="ទូរស័ព្ទ ឬ Telegram"
@@ -830,15 +1028,15 @@ function App() {
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) =>
-                  setImagePreviews(
-                    Array.from(e.target.files || []).map((file) => URL.createObjectURL(file)),
-                  )
-                }
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  setImageFiles(files);
+                  setImagePreviews(await readFilesAsDataUrls(files));
+                }}
               />
             </label>
-            <button className="primary full" onClick={submitReport}>
-              បញ្ជូនព័ត៌មាន <Icon name="arrow" />
+            <button className="primary full" onClick={submitReport} disabled={isSubmitting}>
+              {isSubmitting ? "កំពុងរក្សាទុក..." : "បញ្ជូនព័ត៌មាន"} <Icon name="arrow" />
             </button>
           </div>
         </div>
@@ -908,9 +1106,21 @@ function App() {
         </div>
       )}
       {details && (
-        <div className="modal" onClick={() => setDetails(null)}>
+        <div
+          className="modal"
+          onClick={() => {
+            setDetails(null);
+            setClaimOpen(false);
+          }}
+        >
           <div className="dialog detail-dialog" onClick={(e) => e.stopPropagation()}>
-            <button className="close" onClick={() => setDetails(null)}>
+            <button
+              className="close"
+              onClick={() => {
+                setDetails(null);
+                setClaimOpen(false);
+              }}
+            >
               ×
             </button>
             <div className={`detail-image ${details.color}`}>
@@ -941,6 +1151,19 @@ function App() {
             <p className="detail-meta">
               <Icon name="clock" /> {details.date}
             </p>
+            {details.contact && (
+              <p className="detail-meta">
+                <Icon name="phone" />
+                <a
+                  className="item-contact"
+                  href={getContactHref(details.contact)}
+                  target={isExternalContact(details.contact) ? "_blank" : undefined}
+                  rel="noreferrer"
+                >
+                  {details.contact}
+                </a>
+              </p>
+            )}
             {details.type === "lost" ? (
               <section className="comment-section">
                 <strong>បានឃើញរបស់នេះ?</strong>
@@ -989,11 +1212,11 @@ function App() {
                     type="file"
                     accept="image/*"
                     multiple
-                    onChange={(e) =>
-                      setCommentImagePreviews(
-                        Array.from(e.target.files || []).map((file) => URL.createObjectURL(file)),
-                      )
-                    }
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      setCommentFiles(files);
+                      setCommentImagePreviews(await readFilesAsDataUrls(files));
+                    }}
                   />
                 </label>
                 <button className="detail-contact" onClick={submitComment}>
@@ -1006,15 +1229,67 @@ function App() {
                   សម្រាប់ការទាក់ទង និងការអរគុណអ្នករើសបាន សូមប្រើ private Telegram chat
                   រវាងម្ចាស់របស់ និងអ្នករកឃើញផ្ទាល់។
                 </p>
-                <button
+                <a
                   className="detail-contact"
-                  onClick={() => {
-                    setDetails(null);
-                    showToast("សូមទាក់ទងតាម Telegram របស់អ្នករាយការណ៍");
+                  href={getContactHref(details.contact || "")}
+                  target={
+                    details.contact && isExternalContact(details.contact) ? "_blank" : undefined
+                  }
+                  rel="noreferrer"
+                  onClick={(event) => {
+                    if (!details.contact) {
+                      event.preventDefault();
+                      showToast("This post has no contact number yet");
+                    }
                   }}
                 >
                   <Icon name="phone" /> ទាក់ទងអ្នករាយការណ៍
-                </button>
+                </a>
+                {!claimOpen ? (
+                  <button
+                    className="secondary full claim-toggle"
+                    onClick={() => setClaimOpen(true)}
+                  >
+                    ខ្ញុំជាម្ចាស់របស់នេះ
+                  </button>
+                ) : (
+                  <div className="claim-form">
+                    <strong>បញ្ជាក់ថារបស់នេះជារបស់អ្នក</strong>
+                    <input
+                      value={claimForm.name}
+                      onChange={(event) => updateClaimField("name", event.target.value)}
+                      placeholder="ឈ្មោះរបស់អ្នក"
+                    />
+                    <input
+                      type="tel"
+                      value={claimForm.contact}
+                      onChange={(event) => updateClaimField("contact", event.target.value)}
+                      placeholder="លេខទូរសព្ទ ឬ Telegram"
+                    />
+                    <textarea
+                      value={claimForm.proof}
+                      onChange={(event) => updateClaimField("proof", event.target.value)}
+                      placeholder="ប្រាប់ព័ត៌មានសម្ងាត់ដែលបញ្ជាក់ថាវាជារបស់អ្នក..."
+                    />
+                    <label className="claim-upload">
+                      <span>បន្ថែមរូបភាពបញ្ជាក់ (ជាជម្រើស)</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(event) => setClaimFiles(Array.from(event.target.files || []))}
+                      />
+                    </label>
+                    <div className="claim-actions">
+                      <button className="secondary" onClick={() => setClaimOpen(false)}>
+                        បោះបង់
+                      </button>
+                      <button className="primary" onClick={submitClaim} disabled={isSubmitting}>
+                        {isSubmitting ? "កំពុងផ្ញើ..." : "ផ្ញើការបញ្ជាក់"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
