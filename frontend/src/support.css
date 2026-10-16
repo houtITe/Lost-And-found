@@ -98,25 +98,9 @@
 .claim-actions{display:flex;gap:8px;justify-content:flex-end}
 .claim-actions button{padding:9px 12px;font-size:10px}
 
-.nav-link-button {
-  border: 0;
-  padding: 29px 2px 25px;
-  background: transparent;
-  color: #80928b;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-
-.nav-link-button:hover {
-  color: #186557;
-  border-color: #dfa05d;
-}
-
-.recycle-mobile-button {
-  display: none;
+.recycle-button {
+  display: grid;
+  place-items: center;
   width: 34px;
   height: 34px;
   border: 1px solid #dcebe4;
@@ -125,6 +109,11 @@
   color: #287163;
   font-size: 20px;
   cursor: pointer;
+}
+
+.recycle-button:hover {
+  background: #e3f2ea;
+  color: #1d6658;
 }
 
 .resolution-action {
@@ -255,15 +244,6 @@
 }
 
 @media (max-width: 760px) {
-  .recycle-mobile-button {
-    display: grid;
-    place-items: center;
-  }
-
-  .nav-link-button {
-    padding: 11px 2px;
-  }
-
   .recycle-card {
     grid-template-columns: 48px minmax(0, 1fr);
   }

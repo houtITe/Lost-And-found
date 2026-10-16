@@ -104,6 +104,13 @@ const developerInfo = {
 const RUPP_LOGO_URL = "https://portal.verify.rupp.edu.kh/images/outside_logo.png";
 const REPORTED_ITEMS_STORAGE_KEY = "rupp-lost-and-found-reported-items";
 const RECYCLE_BIN_STORAGE_KEY = "rupp-lost-and-found-recycle-bin";
+const RECYCLE_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
+
+const isWithinRecycleWindow = (item) => {
+  if (!item.resolvedAt) return true;
+  const resolvedAt = new Date(item.resolvedAt).getTime();
+  return Number.isNaN(resolvedAt) || Date.now() - resolvedAt < RECYCLE_RETENTION_MS;
+};
 
 const readFilesAsDataUrls = (fileList) =>
   Promise.all(
@@ -160,6 +167,11 @@ function Icon({ name }) {
     plus: (
       <>
         <path d="M12 5v14M5 12h14" />
+      </>
+    ),
+    trash: (
+      <>
+        <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
       </>
     ),
     mail: (
@@ -288,7 +300,7 @@ function App() {
     try {
       const storedItems = window.localStorage.getItem(RECYCLE_BIN_STORAGE_KEY);
       const parsedItems = storedItems ? JSON.parse(storedItems) : null;
-      return Array.isArray(parsedItems) ? parsedItems : [];
+      return Array.isArray(parsedItems) ? parsedItems.filter(isWithinRecycleWindow) : [];
     } catch {
       return [];
     }
@@ -330,6 +342,18 @@ function App() {
       // Storage can be unavailable or full; the current session still remains usable.
     }
   }, [recycleItems]);
+
+  useEffect(() => {
+    const removeExpiredItems = () => {
+      setRecycleItems((current) => {
+        const activeItems = current.filter(isWithinRecycleWindow);
+        return activeItems.length === current.length ? current : activeItems;
+      });
+    };
+
+    const timer = window.setInterval(removeExpiredItems, 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -607,7 +631,7 @@ function App() {
 
     try {
       const response = await fetchRecycleBin();
-      setRecycleItems((response.data || []).map(normalizeItem));
+      setRecycleItems((response.data || []).map(normalizeItem).filter(isWithinRecycleWindow));
       setApiState("online");
     } catch {
       if (apiState !== "offline") setApiState("offline");
@@ -710,17 +734,15 @@ function App() {
           </a>
           <a href="#items">ស្វែងរករបស់</a>
           <a href="#contact">ទាក់ទង</a>
-          <button className="nav-link-button" onClick={openRecycleBin}>
-            ធុងសំរាម
-          </button>
         </nav>
         <div className="top-actions">
           <button
-            className="recycle-mobile-button"
+            className="recycle-button"
             onClick={openRecycleBin}
             aria-label="បើក Recycle Bin"
+            title="ធុងសំរាម"
           >
-            ↺
+            <Icon name="trash" />
           </button>
           <button className="report-small" onClick={() => openReport("found")}>
             <Icon name="plus" /> រាយការណ៍
@@ -1235,7 +1257,7 @@ function App() {
             <h2>ធុងសំរាមប្រកាស</h2>
             <p>
               នៅទីនេះជាប្រកាសដែលសហគមន៍បានបញ្ជាក់ថារកឃើញហើយ។ បើចុចខុស reporter អាចស្តារវិញ
-              ដោយ recovery code។
+              ដោយ recovery code ក្នុងរយៈពេល ២ ថ្ងៃ។ បន្ទាប់ពី ២ ថ្ងៃ ប្រកាសនឹងលុបជាអចិន្ត្រៃយ៍។
             </p>
             {recycleLoading ? (
               <div className="recycle-empty">កំពុងផ្ទុកប្រកាសដែលបានបិទ...</div>

@@ -4,14 +4,21 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Item;
+use App\Services\ResolvedItemCleanup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class ItemController extends Controller
 {
+    public function __construct(private readonly ResolvedItemCleanup $cleanup)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
+        $this->cleanup->purge();
+
         $filters = $request->validate([
             'type' => ['nullable', 'in:lost,found'],
             'status' => ['nullable', 'in:open,claimed,returned'],
@@ -62,6 +69,8 @@ class ItemController extends Controller
 
     public function recycleBin(Request $request): JsonResponse
     {
+        $this->cleanup->purge();
+
         $filters = $request->validate([
             'type' => ['nullable', 'in:lost,found'],
             'search' => ['nullable', 'string', 'max:100'],

@@ -47,6 +47,9 @@ php artisan key:generate
 php artisan migrate --seed
 php artisan storage:link
 php artisan serve
+
+# In a second terminal, run the 2-day recycle-bin cleanup scheduler
+php artisan schedule:work
 ```
 
 កែ database values នៅ `backend/.env` ឱ្យត្រូវនឹង MySQL ឬ SQLite របស់អ្នក។

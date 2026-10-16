@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
+use App\Models\Item;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -119,5 +120,27 @@ class GuestItemsApiTest extends TestCase
             ->assertJsonPath('item.status', 'open');
 
         $this->getJson('/api/items')->assertOk()->assertJsonPath('data.0.title', 'Motorbike key');
+    }
+
+    public function test_resolved_reports_older_than_two_days_are_permanently_removed(): void
+    {
+        $category = Category::create(['name' => 'Wallet']);
+        $create = $this->postJson('/api/items', [
+            'reporter_name' => 'Rithy',
+            'contact' => '012333444',
+            'category_id' => $category->id,
+            'type' => 'lost',
+            'title' => 'Black wallet',
+            'description' => 'Lost near the canteen.',
+            'location' => 'Canteen',
+            'event_date' => now()->toDateString(),
+        ])->assertCreated();
+
+        $itemId = $create->json('item.id');
+        $this->postJson("/api/items/{$itemId}/resolve", ['confirmation' => true])->assertOk();
+        Item::query()->whereKey($itemId)->update(['resolved_at' => now()->subDays(3)]);
+
+        $this->getJson('/api/items/recycle-bin')->assertOk()->assertJsonCount(0, 'data');
+        $this->assertDatabaseMissing('items', ['id' => $itemId]);
     }
 }

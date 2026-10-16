@@ -57,6 +57,15 @@ php artisan storage:link
 php artisan optimize
 ```
 
+Recycle Bin cleanup runs daily and permanently deletes resolved posts older than two days. On a
+server, configure a cron entry that runs every minute:
+
+```cron
+* * * * * cd /path/to/backend && php artisan schedule:run >> /dev/null 2>&1
+```
+
+For local development, use `php artisan schedule:work` in a separate terminal.
+
 បើ hosting មាន ephemeral filesystem សូមប្រើ S3-compatible storage សម្រាប់ uploaded images។
 
 ## 3. Deploy frontend
